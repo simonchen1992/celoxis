@@ -50,6 +50,8 @@ if (isset($_GET['a'])) {
 							data: res.data,
 							colHeaders: res.colHeaders,
 							columns: res.columns,
+							
+							
 							afterChange: function (change, source) {
 								if (source == 'edit' && !threadAutosaver) {
 									gChange = JSON.stringify(change);
@@ -77,6 +79,29 @@ if (isset($_GET['a'])) {
 							},
 						});
 						handsontable = $container.data('handsontable');
+						// this part is added to ensure previous data in quo-pro-exp tables shall not be modified by operator
+						if ((res.table === 'quotationsNums') || (res.table === 'expedientsNums') || (res.table === 'projectsNums')){
+							handsontable.updateSettings({
+								cells: function (row, col) {
+									var cellProperties = {};
+									var maxrow = handsontable.countRows();
+									var colh = handsontable.getColHeader(col);
+									if (row < maxrow-1 && colh != 'date' && colh != 'description'){
+										cellProperties.readOnly = true;
+									}
+									return cellProperties;
+							}
+							});
+						}else{
+							handsontable.updateSettings({
+								cells: function (row, col) {
+									var cellProperties = {};
+									cellProperties.readOnly = false;
+									return cellProperties;
+							}
+							});
+						}
+
 						$console.text('Data loaded successfuly.');
 					},
 				});
@@ -100,12 +125,14 @@ if (isset($_GET['a'])) {
 <body>
 
 	<select size="1" name"table" id="selectTable">
-		<option>years</option>
 		<option>authors</option>
 		<option>customers</option>
+		<option>suppliers</option>
 		<option>sections</option>
 		<option>documenttypes</option>
 		<option>projecttypes</option>
+		<option>services</option>
+		<option>years</option>
 		<option>quotationsNums</option>
 		<option>projectsNums</option>
 		<option>expedientsNums</option>

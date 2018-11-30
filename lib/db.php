@@ -68,6 +68,7 @@ function db_update($table, $data, $filter) {
 	global $db;
 	$setclauses = "";
 	db_populate_serial($table, $data, $filter);
+	# Generate AUTOGENNAME for following three tables.
     switch ($table) {
         case 'quotationsNums':
             $data['nameAutoGen'] = (string)$data['id_year'].'_'.(string)$data['id_section'].'_'.
@@ -90,9 +91,6 @@ function db_update($table, $data, $filter) {
 		$placeholders[$field]=":$field";
 		$values[$field] = $value;
 		$setclauses .= "$field=:$field, ";
-		#if ($fields[$field]=='id_documenttype'){
-		#	$values[$field]='CARLOS_TEST';
-		#}
 	}
 	if ($setclauses !== "") {
 		$setclauses = substr($setclauses, 0, -2);
@@ -115,6 +113,7 @@ function db_update($table, $data, $filter) {
 	}
 	try {
 		$stmt->execute();
+		// Once you can only update for one cell of data, or it will insert a new one, which will confilic with "Need More Data..." part
 		if ($stmt->rowCount()===0) {
 			return db_insert($table, $data);
 		} else {
@@ -140,6 +139,12 @@ function db_select($table, $filter) {
 	}
 
 	$sql = "SELECT * FROM $table$where;";
+	#  Exceptional case for customer and client which share one table in database.
+	if ($table === 'customers'){
+		$sql = "SELECT * FROM customers WHERE supplierORclient = 'client' or supplierORclient = 'client-supplier'";
+	}elseif ($table === 'suppliers'){
+		$sql = "SELECT * FROM customers WHERE supplierORclient = 'supplier' or supplierORclient = 'client-supplier'";
+	}
 	$stmt = $db->prepare($sql);
 
 	foreach ($filter as $field => $value) {
@@ -176,9 +181,12 @@ function db_handsometable_encode($table, $res) {
 		}
 		$data[]=$row;
 	}
-
 	$columns = array();
 	$colHeaders = array();
+	#  Exceptional case for customer and client which share one table in database.
+	if ($table === 'suppliers'){
+		$table = 'customers';
+	}
 	$tabledef = db_describe($table);
 	foreach ($tabledef as $field => $fdata) {
 		$colHeaders[] = $fdata['name'];
@@ -186,8 +194,10 @@ function db_handsometable_encode($table, $res) {
 			$columns[] = array('type'=>'date');
 		} elseif ($fdata['name'] == 'serial') {
 			$columns[] = array('readOnly'=>TRUE);
+		} elseif ($fdata['name'] == 'supplierORclient'){
+			$columns[] = array('type'=>'dropdown', 'source'=>['supplier', 'client', 'client-supplier']);
 		} elseif (substr($fdata['name'],0,3) == 'id_') {
-			if ($table=='quotationsNums'&& $fdata['name'] == 'id_documenttyp'){  # need to be changed
+			if ($table=='quotationsNums'&& $fdata['name'] == 'id_documenttype'){  
 				$columns[] = array('readOnly'=>TRUE);
 			}else{
 				$columns[] = db_handsometable_getdropdowndata($table, $fdata['name']);
@@ -198,9 +208,11 @@ function db_handsometable_encode($table, $res) {
 	}
 
 	return json_encode(array(
+		'table' => $table,
 		'columns'=>$columns,
 		'colHeaders'=>$colHeaders, 
-		'data'=>$data));
+		'data'=>$data,
+		));
 }
 
 function db_handsometable_getdropdowndata($table, $idname) {
@@ -231,7 +243,10 @@ function db_handsometable_save($table, $input) {
 			$changed_cell = $changed['1'];
 			$original_val = $changed['2'];
 			$new_val = $changed['3'];
-
+			#  Exceptional case for customer and client which share one table in database.
+			if ($table === 'suppliers'){
+				$table = 'customers';
+			}
 			$tabledef = db_describe($table);
 			$new_row = $input['data'][$changed_row];
 			$i=0;
@@ -249,43 +264,61 @@ function db_handsometable_save($table, $input) {
 
 function db_populate_serial($table, &$data, &$filter) {
 	global $db;
-	if ($table !== 'quotationsNums' && $table !== 'expedientsNums' && $table !== 'projectsNums') {
+	if ($table === 'suppliers' || $table === 'customers'){
+		if (!in_array($data['supplierORclient'], ['supplier', 'client', 'client-supplier'])){
+			die(json_encode("Please fill the blank properly which can be found in dropbox"));
+		}
+	}
+	if ($table !== 'quotationsNums' && $table !== 'expedientsNums' && $table !== 'projectsNums' && $table !== 'relation_qtn_pro_exp') {
 		return;
 	}
 
+	if ($table === 'quotationsNums'){
+		$data['id_documenttype'] = 'QTN';
+	}
+
+	# Check if all data is filled without empty.
 	foreach ($data as $key => $value) {
-		if (substr($key,0,3)==='id_' && $value==='') {
+		if ((substr($key,0,3)==='id_' || $key === 'description' || $key === 'date') && $value==='' && $table !== 'relation_qtn_pro_exp') {
 			die(json_encode("Need more data..."));
 		}
 	}
 
-    if (isset($filter['serial']) && $filter['serial'] !== '') {
-		$sql = "SELECT * FROM $table";
-		foreach ($db->query($sql) as $row) {
-			if($key == count($db->query($sql)) -1){
-				$count = $row;
+	# Check for columns that have dropbox, to ensure the fill-in data is involved in their dropbox.
+	# Which is the only reason Relation table is here.
+	foreach ($data as $key => $value) {
+		if (substr($key,0,3)==='id_' && $value !== '') {
+			$columns[] = db_handsometable_getdropdowndata($table, $key);
+			if (!in_array($value, $columns[0]["source"])){
+				die(json_encode("Please fill the blank properly which can be found in dropbox"));
+			}
+			array_pop($columns);
 		}
-		}
-		$flag = 0;   
-		foreach ($filter as $temp) {   
-			if (in_array($temp, $count)) {   
-				continue;   
-			}else {   
-				$flag = 1;   
-				break;   
-			}   
-		}   
-		if ($flag) {
-			die(json_encode("You can only modify previous data in database."));
-		}
-    }
+	}
 
     $filter_counter = array();
     foreach ($data as $fkey => $fvalue) {
         if (substr($fkey,0,3)==='id_') {
             $filter_counter[$fkey]=$fvalue;
         }
-    }
+	}
+	
+	# Relation table does not need to generate serial number AND there can be empty in some of cells.
+	if ($table === 'relation_qtn_pro_exp') {
+		$rows = db_select($table, $filter_counter);
+		if (count($rows) !== 0){
+			die(json_encode("Cannot input the same combination in relation tables."));
+		}
+		return;
+	}
+
+	
+	# Do not need to calculate serial again if only modify "data" or "description" or "NOTHING"
+	$ignoreInput = array('date', 'description', NULL);
+	if (in_array(key(array_diff($filter,$data)), $ignoreInput) && (isset($data['serial']) && $data['serial'] !=='')){
+		return;
+	}
+
 
 	switch ($table) {
 		case 'quotationsNums':
