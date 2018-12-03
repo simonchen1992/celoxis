@@ -192,7 +192,7 @@ function db_handsometable_encode($table, $res) {
 		$colHeaders[] = $fdata['name'];
 		if ($fdata['type'] == 'LONG' && $fdata['name'] == 'date') {
 			$columns[] = array('type'=>'date');
-		} elseif ($fdata['name'] == 'serial') {
+		} elseif ($fdata['name'] == 'serial' || $fdata['name'] == 'nameAutoGen') {
 			$columns[] = array('readOnly'=>TRUE);
 		} elseif ($fdata['name'] == 'supplierORclient'){
 			$columns[] = array('type'=>'dropdown', 'source'=>['supplier', 'client', 'client-supplier']);
