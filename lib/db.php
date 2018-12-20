@@ -38,8 +38,26 @@ function db_insert($table, $data) {
 
 function db_delete($table, $filter) {
 	global $db;
+	#  Exceptional case for customer and client which share one table in database.
+	if ($table === 'suppliers'){
+		$table = 'customers';
+	}
+	$filter['selected'] = json_decode($filter['selected']);
+	$filter['data'] = json_decode($filter['data']);
+	if (isset($filter['selected'])) {
+		$selected_row = $filter['selected']['0'];
+		$selected_col = $filter['selected']['1'];
+		$tabledef = db_describe($table);
+		$selected_row = $filter['data'][$selected_row];
+		$i=0;
+		foreach ($tabledef as $fkey => $fdata) {
+			$selected_data[$fdata['name']] = isset($selected_row[$i]) ? $selected_row[$i] : "";
+			$i++;
+		}
+	}
+	
 	$where = "";
-	foreach ($filter as $field => $value) {
+	foreach ($selected_data as $field => $value) {
 		$fields[$field]=$field;
 		$placeholders[$field]=":$field";
 		$values[$field] = $value;
@@ -53,7 +71,7 @@ function db_delete($table, $filter) {
 	$sql = "DELETE FROM $table$where;";
 	$stmt = $db->prepare($sql);
 
-	foreach ($filter as $field => $value) {
+	foreach ($selected_data as $field => $value) {
 		$stmt->bindParam($placeholders[$field], $values[$field]);
 	}
 	try {
@@ -145,6 +163,7 @@ function db_select($table, $filter) {
 	}elseif ($table === 'suppliers'){
 		$sql = "SELECT * FROM customers WHERE supplierORclient = 'supplier' or supplierORclient = 'client-supplier'";
 	}
+	
 	$stmt = $db->prepare($sql);
 
 	foreach ($filter as $field => $value) {
@@ -152,7 +171,13 @@ function db_select($table, $filter) {
 	}
 	try {
 		$stmt->execute();
-		return $stmt->fetchAll();
+		$output = $stmt->fetchAll();
+		// This part is for deletion user-psw validation 
+		if ($table === 'privilege'){
+			return $output['0']['password'];
+		}else {
+			return $output;
+		}
 	} catch (PDOException $e) {
 		return $e->getMessage() ." - $sql";
 	}
@@ -235,7 +260,7 @@ function db_handsometable_getdropdowndata($table, $idname) {
 }
 
 function db_handsometable_save($table, $input) {
-    $input['changed'] = json_decode($input['changed']);
+	$input['changed'] = json_decode($input['changed']);
     $input['data'] = json_decode($input['data']);
 	if (isset($input['changed'])) {
 		foreach ($input['changed'] as $key => $changed) {
@@ -266,7 +291,7 @@ function db_populate_serial($table, &$data, &$filter) {
 	global $db;
 	if ($table === 'suppliers' || $table === 'customers'){
 		if (!in_array($data['supplierORclient'], ['supplier', 'client', 'client-supplier'])){
-			die(json_encode("Please fill the blank properly which can be found in dropbox"));
+			die(json_encode(array('msg'=>"Please fill the blank properly which can be found in dropbox", "action"=>"load")));
 		}
 	}
 	if ($table !== 'quotationsNums' && $table !== 'expedientsNums' && $table !== 'projectsNums' && $table !== 'relation_qtn_pro_exp') {
@@ -280,7 +305,11 @@ function db_populate_serial($table, &$data, &$filter) {
 	# Check if all data is filled without empty.
 	foreach ($data as $key => $value) {
 		if ((substr($key,0,3)==='id_' || $key === 'description' || $key === 'date') && $value==='' && $table !== 'relation_qtn_pro_exp') {
-			die(json_encode("Need more data..."));
+			if ($filter[$key] !== ''){
+				die(json_encode(array('msg'=>"Need More Data...", "action"=>"load")));
+			}else {
+				die(json_encode(array('msg'=>"Need More Data...", "action"=>"donothing")));
+			}
 		}
 	}
 
@@ -290,7 +319,7 @@ function db_populate_serial($table, &$data, &$filter) {
 		if (substr($key,0,3)==='id_' && $value !== '') {
 			$columns[] = db_handsometable_getdropdowndata($table, $key);
 			if (!in_array($value, $columns[0]["source"])){
-				die(json_encode("Please fill the blank properly which can be found in dropbox"));
+				die(json_encode(array('msg'=>"Please fill the blank properly which can be found in dropbox", "action"=>"load")));
 			}
 			array_pop($columns);
 		}
@@ -306,10 +335,17 @@ function db_populate_serial($table, &$data, &$filter) {
 	# Relation table does not need to generate serial number AND there can be empty in some of cells.
 	if ($table === 'relation_qtn_pro_exp') {
 		$rows = db_select($table, $filter_counter);
-		if (count($rows) !== 0){
-			die(json_encode("Cannot input the same combination in relation tables."));
+		if (count($rows) !== 0 && !in_array(key(array_diff($filter,$data)), array('comments', NULL))){
+			die(json_encode(array('msg'=>"Cannot input the same combination in relation tables.", "action"=>"load")));
 		}
 		return;
+	}
+
+	# AutoNameGen cannot be repeated in the same table!
+	$rows = db_select($table, array('nameAutoGen'=> $data['nameAutoGen']));
+	$count = $data['nameAutoGen']!==''? count($rows) - 1: count($rows);
+	if ($count !== 0){
+		die(json_encode(array('msg'=>"Cannot accept two same autoNameGen.", "action"=>"load")));
 	}
 
 	

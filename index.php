@@ -15,6 +15,13 @@ if (isset($_GET['a'])) {
 		case 'save':
 			die(json_encode(db_handsometable_save($_GET['t'], $_POST)));
 			break;
+		case 'delete':
+			die(json_encode(db_delete($_GET['t'], $_POST)));
+			break;
+		case 'user':
+			$res = db_select('privilege', array('user'=>'Carlos Garcia'));
+			die(json_encode($res));
+			break;
 	}
 }
 
@@ -50,6 +57,7 @@ if (isset($_GET['a'])) {
 							data: res.data,
 							colHeaders: res.colHeaders,
 							columns: res.columns,
+							outsideClickDeselects: false,
 							
 							
 							afterChange: function (change, source) {
@@ -65,8 +73,11 @@ if (isset($_GET['a'])) {
 											success: function (data, res) {
 												if (data === true) {
 													$parent.find('button[name=load]').click();
+												} else if (data["action"] === 'load'){
+													$parent.find('button[name=load]').click();
+													alert(data["msg"]);
 												} else {
-													$console.text(data);
+													$console.text(data["msg"]);
 												}
 											},
 											error: function () {
@@ -78,7 +89,7 @@ if (isset($_GET['a'])) {
 								}
 							},
 						});
-						handsontable = $container.data('handsontable');
+						handsontable = $container.data('handsontable');  // do not understand this line?? To be check if it has influence in the code
 						// this part is added to ensure previous data in quo-pro-exp tables shall not be modified by operator
 						if ((res.table === 'quotationsNums') || (res.table === 'expedientsNums') || (res.table === 'projectsNums')){
 							handsontable.updateSettings({
@@ -112,9 +123,50 @@ if (isset($_GET['a'])) {
 				handsontable.alter('insert_row');
 			});
 
+
             $parent.find('button[name=delete]').click(function () {
-                handsontable.alter('remove_row');
-            });
+				psd = prompt("Please enter secure password for deletion:")
+				$.ajax({
+					url: "?a=user&t="+$('#selectTable').find(":selected").text(),
+					dataType: 'json',
+					type: 'GET',
+					data: {'user': 'Carlos Garcia', 'password': psd},
+					success: function (data, res) {
+						if (JSON.stringify(data) === JSON.stringify(psd)) {
+							gselected = handsontable.getSelected();
+							if (gselected[0] !== gselected[2]){
+								alert("Cannot select more than one rows");
+								return;
+							}
+							gselected = JSON.stringify(gselected);
+							gtransfer = JSON.stringify(handsontable.getData());
+							$.ajax({
+								url: "?a=delete&t="+$('#selectTable').find(":selected").text(),
+								dataType: 'json',
+								type: 'POST',
+								data: {'data': gtransfer, 'selected': gselected},
+								success: function (data, res) {
+									if (data === true) {
+										$parent.find('button[name=load]').click();
+									} else {
+										$console.text(data);
+									}
+								},
+								error: function () {
+									$console.text("Error deletion data.");
+								},
+							});
+						} else {
+							alert('Wrong password!');
+						}
+					},
+					error: function () {
+						$console.text("Error verify user.");
+					},
+				});
+			});
+
+
 
 			$parent.find('button[name=save]').click(function () {
 
@@ -123,6 +175,7 @@ if (isset($_GET['a'])) {
 	</script>
 </head>
 <body>
+
 
 	<select size="1" name"table" id="selectTable">
 		<option>authors</option>
